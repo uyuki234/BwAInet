@@ -115,9 +115,49 @@ WiFi:
 
 会場の上流 (blackbox) がプロキシを挟む可能性があるため、当日の環境に応じて下位トンネルのみ切り替え。
 
-- wg0 の MTU は 1400 に固定 (SoftEther 経由時のオーバーヘッドを考慮)
 - 直接接続時: `endpoint = <自宅グローバルIP>:51820`
 - SoftEther 経由時: `endpoint = <SoftEther tap 対向IP>:51820`
+
+### MTU 設計
+
+#### 自宅回線の実測パス MTU
+
+Cloudflare (1.1.1.1) への DF ビット付き ICMP で計測:
+
+```
+1464B payload + 28B header = 1492B  ← 通過
+1465B payload + 28B header = 1493B  ← DF エラー (192.168.10.1 から ICMP Fragmentation Needed)
+```
+
+**パス MTU = 1492** (PPPoE オーバーヘッド 8B: 1500 - 8 = 1492)
+
+#### トンネル経由の実効 MTU
+
+```
+自宅パス MTU:                                    1492
+
+WireGuard 直接 (UDP/IPv4):
+  1492 - 20(IPv4) - 8(UDP) - 32(WG header) =    1432
+
+WireGuard over SoftEther:
+  1492 - 20(IPv4) - 8(UDP) - 32(WG) - ~40(SE) = ~1392
+```
+
+#### wg0 MTU 設定: 1380
+
+- WireGuard 直接時: 52B の余裕
+- SoftEther 経由時: 12B の余裕
+- トンネル内 IPv6 の TCP MSS: 1380 - 40(IPv6) - 20(TCP) = **1320**
+- IPv6 最小 MTU (1280, RFC 8200) まで **100B の余裕**
+
+#### MSS Clamping
+
+PMTUD はパス上の ICMP フィルタリングにより信頼できない場合がある (Azure 等では ICMP が 50B 超でドロップされることを確認済み)。wg0 で TCP MSS clamping を設定し、PMTUD に依存しない設計にする。
+
+```
+# VyOS
+set firewall options interface wg0 adjust-mss clamp-mss-to-pmtu
+```
 
 ### GCP 接続
 
