@@ -34,6 +34,11 @@ ServerStatusGet/         # サーバー状態取得ツール (開発中)
 - VyOS 設定スクリプトは Python 3 で記述し、VyOS API (`/configure`) 経由で投入する
 - 設計書は Markdown 形式で `docs/design/` に配置する
 
+## VyOS API 操作ルール
+
+- VyOS API への設定投入・確認を指示された場合、**Python スクリプトを生成するのではなく、`curl` 等を使って Bash から直接 API を実行する**
+- 投入前に内容を提示し確認を取ること（破壊的操作のため）
+
 ## VyOS REST API
 
 ### エンドポイント

@@ -64,8 +64,41 @@ PAC ファイルの要点：
 ```
 
 - DIRECT_LIST に明示されたドメインのみプロキシをバイパス
-- DIRECT_LIST には Google、Adobe、Microsoft 365、Unity、Epic/Unreal、Steam 等が登録済み
 - **DIRECT_LIST に含まれないドメインは全てプロキシ経由が強制される**
+
+#### DIRECT_LIST 許可ドメイン一覧
+
+| カテゴリ | ドメインパターン |
+|---|---|
+| **学内特例** | `hew.osaka.hal.ac.jp`, `172.16.254.*`, `10.8.16.209:8501` |
+| **Google** | `accounts.google.com`, `*.googleapis.com` |
+| **Fontworks (NewLETS)** | `service.fontace.jp` |
+| **Celsys / CLIP STUDIO** | `license2.jp`, `*.license2.jp`, `*.celsys.co.jp`, `*.clip-studio.com`, `license.celsys.co.jp` |
+| **CDN / AWS** | `*.amazonaws.com`, `s3.amazonaws.com`, `cdn.jsdelivr.net`, `cdnjs.cloudflare.com`, `ajax.googleapis.com`, `*.akamaihd.net` |
+| **Twitter** | `*.twitter.com` |
+| **Maxon / Red Giant** | `redgiant.com`, `link.redgiant.com`, `id.maxon.net`, `*.maxon.net`, `*.*.maxon.net`, `my.maxon.net` |
+| **Adobe (ライセンス)** | `*.licenses.adobe.com`, `lcs-cops.adobe.io`, `genuine.adobe.com`, `prod.adobegenuine.com`, `lm.licenses.adobe.com`, `exception.licenses.adobe.com`, `cs.licenses.adobe.com`, `pubcerts.licenses.adobe.com`, `workflow.licenses.adobe.com`, `resources.licenses.adobe.com`, `*.productrouter.adobe.com` |
+| **Adobe (Creative Cloud)** | `cmdls.adobe.com`, `ccmdl.adobe.com`, `*.oobesaas.adobe.com`, `swupmf.adobe.com`, `swupdl.adobe.com`, `prod.acp.adobeoobe.com`, `ffc-icons.oobesaas.adobe.com`, `cdn-ffc.oobesaas.adobe.com`, `acc.adobeoobe.com`, `armmf.adobe.com`, `ardownload.adobe.com`, `ardownload2.adobe.com`, `agsupdate.adobe.com`, `mir-s3-cdn-cf.behance.net` |
+| **Adobe (認証 / SSO)** | `*.adobelogin.com`, `ims-na1.adobelogin.com`, `ims-prod06.adobelogin.com`, `ims-prod07.adobelogin.com`, `adobeid-na1.services.adobe.com`, `na1e-acc.services.adobe.com`, `na1r.services.adobe.com`, `ams.adobe.com`, `oobe.adobe.com`, `federatedid-na1.services.adobe.com`, `adobelogin.prod.ims.adobejanus.com`, `services.prod.ims.adobejanus.com`, `www-prod.adobesunbreak.com`, `auth.services.adobe.com` |
+| **Adobe (その他)** | `api-cna01.adobe-services.com`, `supportanyware.adobe.io`, `www.adobe.com`, `na1e.services.adobe.com`, `awcm177.awmdm.com`, `*.okta.com`, `*.oktacdn.com`, `*.oktapreview.com`, `*.adobess.com`, `gocart-web-prod-*.elb.amazonaws.com` |
+| **Microsoft 365 (Office)** | `*.microsoft.com`, `*.officeapps.live.com`, `*.online.office.com`, `office.live.com`, `*.cdn.office.net`, `contentstorage.osi.office.net`, `*.onenote.com`, `*cdn.onenote.net`, `officeapps.live.com`, `www.onedrive.com`, `*.office365.com`, `*.office.com`, `home.office.com`, `www.office.com`, `products.office.com` |
+| **Microsoft 365 (Azure AD / 認証)** | `*.msftidentity.com`, `*.msidentity.com`, `account.activedirectory.windowsazure.com`, `accounts.accesscontrol.windows.net`, `adminwebservice.microsoftonline.com`, `autologon.microsoftazuread-sso.com`, `becws.microsoftonline.com`, `clientconfig.microsoftonline-p.net`, `companymanager.microsoftonline.com`, `device.login.microsoftonline.com`, `graph.microsoft.com`, `graph.windows.net`, `login.microsoft.com`, `login.microsoftonline.com`, `login.microsoftonline-p.com`, `login.windows.net`, `logincert.microsoftonline.com`, `loginex.microsoftonline.com`, `login-us.microsoftonline.com`, `nexus.microsoftonline-p.com`, `passwordreset.microsoftonline.com`, `provisioningapi.microsoftonline.com`, `portal.microsoftonline.com`, `portal.office.com` |
+| **Microsoft 365 (セキュリティ)** | `*.hip.live.com`, `*.microsoftonline.com`, `*.microsoftonline-p.com`, `*.msauth.net`, `*.msauthimages.net`, `*.msecnd.net`, `*.msftauth.net`, `*.msftauthimages.net`, `*.phonefactor.net`, `enterpriseregistration.windows.net`, `management.azure.com`, `policykeyservice.dc.ad.msft.net`, `secure.aadcdn.microsoftonline-p.com`, `*.compliance.microsoft.com`, `*.protection.office.com`, `*.security.microsoft.com`, `*.portal.cloudappsecurity.com` |
+| **Microsoft 365 (Delve / Analytics)** | `apc.delve.office.com`, `aus.delve.office.com`, `can.delve.office.com`, `delve.office.com`, `delve-gcc.office.com`, `eur.delve.office.com`, `gbr.delve.office.com`, `ind.delve.office.com`, `jpn.delve.office.com`, `kor.delve.office.com`, `lam.delve.office.com`, `nam.delve.office.com`, `suite.office.net`, `webshell.suite.office.com`, `cdnprod.myanalytics.microsoft.com`, `myanalytics.microsoft.com`, `myanalytics-gcc.microsoft.com`, `workplaceanalytics.cdn.office.net`, `workplaceanalytics.office.com` |
+| **Microsoft 365 (テレメトリ / CDN)** | `*.aria.microsoft.com`, `*.events.data.microsoft.com`, `*.o365weve.com`, `amp.azure.net`, `appsforoffice.microsoft.com`, `assets.onestore.ms`, `auth.gfx.ms`, `az826701.vo.msecnd.net`, `c1.microsoft.com`, `dgps.support.microsoft.com`, `docs.microsoft.com`, `msdn.microsoft.com`, `platform.linkedin.com`, `prod.msocdn.com`, `r1.res.office365.com`, `r4.res.office365.com`, `res.delve.office.com`, `shellprod.msocdn.com`, `support.content.office.net`, `support.microsoft.com`, `support.office.com`, `technet.microsoft.com`, `templates.office.com`, `videocontent.osi.office.net`, `videoplayercdn.osi.office.net` |
+| **Microsoft 365 (その他)** | `ajax.aspnetcdn.com`, `apis.live.net`, `cdn.optimizely.com`, `api.passwordreset.microsoftonline.com`, `*.config.office.net`, `*.manage.microsoft.com`, `*.manage.office.com`, `manage.office.com`, `admin.microsoft.com`, `cdn.uci.officeapps.live.com`, `*.azure-apim.net`, `*.flow.microsoft.com`, `*.powerapps.com`, `activity.windows.com`, `*.cortana.ai` |
+| **Microsoft (リダイレクト / 更新)** | `o15.officeredir.microsoft.com`, `ocsredir.officeapps.live.com`, `officepreviewredir.microsoft.com`, `officeredir.microsoft.com`, `r.office.microsoft.com`, `activation.sls.microsoft.com`, `crl.microsoft.com`, `office15client.microsoft.com`, `officeclient.microsoft.com`, `insertmedia.bing.office.net`, `go.microsoft.com`, `cdn.odc.officeapps.live.com`, `officecdn.microsoft.com`, `officecdn.microsoft.com.edgesuite.net` |
+| **Microsoft (Azure RMS)** | `*.aadrm.com`, `*.azurerms.com`, `*.informationprotection.azure.com`, `ecn.dev.virtualearth.net`, `informationprotection.hosting.portal.azure.net` |
+| **証明書検証 (CRL / OCSP)** | `*.entrust.net`, `*.geotrust.com`, `*.omniroot.com`, `*.public-trust.com`, `*.symcb.com`, `*.symcd.com`, `*.verisign.com`, `*.verisign.net`, `aia.entrust.net`, `apps.identrust.com`, `cacert.a.omniroot.com`, `cacert.omniroot.com`, `cacerts.digicert.com`, `cdp1.public-trust.com`, `cert.int-x3.letsencrypt.org`, `crl.entrust.net`, `crl.globalsign.com`, `crl.globalsign.net`, `crl.identrust.com`, `crl3.digicert.com`, `crl4.digicert.com`, `isrg.trustid.ocsp.identrust.com`, `mscrl.microsoft.com`, `ocsp.digicert.com`, `ocsp.entrust.net`, `ocsp.globalsign.com`, `ocsp.msocsp.com`, `ocsp.omniroot.com`, `ocsp2.globalsign.com`, `ocspx.digicert.com`, `ocsp.int-x3.letsencrypt.org`, `www.digicert.com`, その他 Symantec/VeriSign 系多数 |
+| **Unity** | `*.unity3d.com`, `*.unity.com`, `*.optimizely.com` |
+| **Epic / Unreal** | `epicgames.com`, `*.epicgames.com`, `*.epicgames.dev`, `unrealengin.com`（原文ママ、typo）, `*.unrealengine.com`, `unrealengine.com`, `quixel.com`, `fab.unrealengine.com` |
+| **Steam** | `steampowered.com`, `steamcommunity.com`, `steamgames.com`, `*.steamusercontent.com`, `*.steamcontent.com`, `*.steamstatic.com` |
+| **Live2D** | `hostedactivation.com`, `www.reprisesoftware.com`, `www.live2d.com` |
+| **CLO Enterprise** | `sapi.clo3d.com`, `sapi.clo3d-china.com`, `*.clo-set.com` |
+
+> **備考**: `isPlainHostName(host)` の場合（ドットを含まないホスト名）も DIRECT が返される。
+>
+> **注目**: `*.amazonaws.com` が含まれているため、AWS 上のサーバへは直接通信が可能。
 
 ### 4.2 プロキシの認証要求
 
