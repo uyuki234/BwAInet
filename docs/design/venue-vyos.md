@@ -83,9 +83,11 @@ set interfaces wireguard wg0 peer r1 endpoint '<自宅グローバルIP>:51820'
 set interfaces wireguard wg0 peer r1 persistent-keepalive 25
 
 # WireGuard (GCP r2-gcp)
+# listen port は wstunnel コンテナ (allow-host-networks で 127.0.0.1:51821 を bind) との
+# UDP ポート衝突を回避するため 51822 を使用する
 set interfaces wireguard wg1 address 10.255.2.1/30
 set interfaces wireguard wg1 mtu 1380
-set interfaces wireguard wg1 port 51821
+set interfaces wireguard wg1 port 51822
 set interfaces wireguard wg1 private-key <r3-private-key>
 set interfaces wireguard wg1 description 'VPN to GCP (r2-gcp)'
 set interfaces wireguard wg1 peer r2-gcp public-key <r2-public-key>
@@ -452,7 +454,7 @@ set container name wstunnel description 'WireGuard over WebSocket tunnel (port r
 
 - **`/home/app/wstunnel` の絶対パス指定は必須**: 公式イメージの `ENTRYPOINT` は `dumb-init -v --` で、VyOS の `container command` は Dockerfile `CMD` に相当する。`dumb-init` は shell を介さず直接 `execve` するため、command を `client -L ...` のようにサブコマンドから始めると `dumb-init: client: No such file or directory` で即 exit 2 して `restart on-failure` のループに落ちる
 - `allow-host-networks`: ホストネットワーク名前空間を共有 (localhost 経由で wg0 と UDP 通信するため必須)
-- `127.0.0.1:51821`: wg0 自身の listen port 51820 と衝突しないよう **51821** を使用
+- `127.0.0.1:51821`: wg0 自身の listen port 51820 と衝突しないよう **51821** を使用 (※ この結果 wg1 (対 r2-gcp) の listen port も 51821 と衝突するため **51822** にずらしている。前述 WireGuard 設定参照)
 - `192.168.10.1:51820`: 自宅 r1 の WireGuard アドレス (自宅 wstunnel server から見た最終転送先)
 - `wss://`: 自宅側 wstunnel サーバーのエンドポイント (TCP 443, TLS)。FQDN 指定可
 
@@ -551,9 +553,10 @@ set interfaces wireguard wg0 peer r1 allowed-ips ::/0
 set interfaces wireguard wg0 peer r1 endpoint '<自宅グローバルIP>:51820'
 set interfaces wireguard wg0 peer r1 persistent-keepalive 25
 
+# wg1 listen port は wstunnel (127.0.0.1:51821) との衝突を避けるため 51822
 set interfaces wireguard wg1 address 10.255.2.1/30
 set interfaces wireguard wg1 mtu 1380
-set interfaces wireguard wg1 port 51821
+set interfaces wireguard wg1 port 51822
 set interfaces wireguard wg1 private-key <r3-private-key>
 set interfaces wireguard wg1 description 'VPN to GCP (r2-gcp)'
 set interfaces wireguard wg1 peer r2-gcp public-key <r2-public-key>

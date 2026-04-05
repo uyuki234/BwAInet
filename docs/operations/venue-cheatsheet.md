@@ -470,6 +470,32 @@ Get-Process "Docker Desktop" | Stop-Process -Force
 Start-Process "C:\Program Files\Docker\Docker\Docker Desktop.exe"
 ```
 
+### 9.6 参加者から「自分の GCP VM に繋がらない」と言われたら
+
+**原因**: Google 系 IP 宛トラフィックは r3 → wg1 → r2-gcp → SNAT → Google backbone で出るため、VM 側から見た送信元 IP が r2-gcp のアドレスに書き換わる。参加者の VM が送信元 IP で制限をかけていると接続不可。
+
+**切り分け**:
+
+```bash
+# r3 上で、該当 VM の公開 IP が goog.json 経由で広告されているか確認
+show ip route <VM の公開 IP>
+# → wg1 (r2-gcp) 経由になっていれば SNAT の影響を受ける
+# → wg0 (r1) 経由なら関係ない別問題
+```
+
+**参加者への案内**:
+
+- `gcloud compute ssh --tunnel-through-iap <VM>` を試してもらう (IAP は認証ベースなので送信元 IP 非依存)
+- または Cloud Shell (ブラウザ上のシェル) 経由、踏み台、Tailscale 等を案内
+- **運営側で BGP 広告や SNAT を止めるような個別対応はしない** (他ユーザーに影響するため)
+
+**r2-gcp の egress IP 確認** (必要時):
+
+```bash
+# r3 から r2-gcp 経由で出た際の見かけ上の IP
+curl --interface wg1 https://ifconfig.me
+```
+
 ---
 
 ## 10. 緊急リカバリ
@@ -596,3 +622,4 @@ curl -k -X POST https://192.168.11.1/config-file \
 - **SoftEther VPN Client の接続ポートは 80** (443 は wstunnel 専用)。クライアント設定が 443 だと wstunnel-server が応答して NoCipherSuitesInCommon エラーになる
 - **Docker Desktop のコンテナからの inbound は全て `172.17.0.1` にマスカレード**される → 送信元 IP での制限/分析は不可
 - **自宅 LAN 内から `tukushityann.net` を叩くと r1 VyOS の nginx (API, 403) が返る** ことがある (ヘアピン NAT が効かないため)。外部経路確認は必ずモバイル回線から
+- **Google 系 IP 宛 (goog.json 該当)** は r2-gcp 経由で出るため送信元 IP が変わる。参加者が自前 GCP VM の送信元 IP 制限に引っかかる可能性あり (詳細 9.6 参照)

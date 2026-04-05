@@ -21,7 +21,7 @@
 
 GCP 向けトラフィックを r2-gcp (GCE 大阪) 経由で Google 内部ネットワークに直接流し、自宅回線 (OPTAGE) の負荷を軽減する。
 
-- **IPv4**: r2-gcp が Google Cloud IP レンジを BGP で広告し、宛先ベースで GCP 向けトラフィックを r2-gcp 経由に最適化。r2-gcp で SNAT。
+- **IPv4**: r2-gcp が Google IP レンジ (`goog.json`) を BGP で広告し、宛先ベースで Google 向けトラフィックを r2-gcp 経由に最適化。r2-gcp で SNAT。
 - **IPv6**: OPTAGE /64 に加え GCP /64 を会場で RA 広告し、r3 の source-based PBR で振り分け。r2-gcp で **NAT66** (GCP の制約により E2E ネイティブ v6 は不可)。
 
 ```
@@ -35,8 +35,8 @@ r3 (PBR: src prefix で振り分け)
 
 [IPv4]
 r3 (BGP: dst で振り分け)
-  ├── dst = Google Cloud IP → wg1 → r2-gcp → SNAT → Google 内部 NW
-  └── dst = その他         → wg0 → r1 → OPTAGE → Internet
+  ├── dst = Google IP (goog.json) → wg1 → r2-gcp → SNAT → Google backbone
+  └── dst = その他                → wg0 → r1 → OPTAGE → Internet
 ```
 
 ### 2. GCP IPv6 制約と NAT66 が必要な理由
@@ -209,11 +209,13 @@ gcloud compute instances create r2-gcp \
 
 既存の v4 アドレス体系に合わせた ULA を追加:
 
-| トンネル | IPv4 | IPv6 (新規) |
-|---------|------|-------------|
-| r1 ↔ r3 (wg0) | 10.255.0.1/30 ↔ .2 | fd00:255:0::1/126 ↔ ::2 |
-| r1 ↔ r2 (wg1) | 10.255.1.1/30 ↔ .2 | fd00:255:1::1/126 ↔ ::2 |
-| r3 ↔ r2 (wg1) | 10.255.2.1/30 ↔ .2 | fd00:255:2::1/126 ↔ ::2 |
+| トンネル | 両端 IF 名 | IPv4 | IPv6 (新規) |
+|---------|-----------|------|-------------|
+| r1 ↔ r3 | r1:wg0 ↔ r3:wg0 | 10.255.0.1/30 ↔ .2 | fd00:255:0::1/126 ↔ ::2 |
+| r1 ↔ r2-gcp | r1:wg1 ↔ r2-gcp:wg1 | 10.255.1.1/30 ↔ .2 | fd00:255:1::1/126 ↔ ::2 |
+| r3 ↔ r2-gcp | r3:wg1 ↔ **r2-gcp:wg2** | 10.255.2.1/30 ↔ .2 | fd00:255:2::1/126 ↔ ::2 |
+
+> **注**: r2-gcp 側は 1 ホストに r1 向け・r3 向けの 2 本を同居させるため、IF 名が `wg1` / `wg2` に分かれる (r1/r3 側はそれぞれ `wg0`/`wg1`)。listen port は r2-gcp:wg1=51820 (r1 ペア)、r2-gcp:wg2=51821 (r3 ペア)。
 
 #### r3 wg1 更新
 
@@ -226,16 +228,16 @@ set interfaces wireguard wg1 peer r2-gcp allowed-ips fd00:255:2::2/128
 set interfaces wireguard wg1 peer r2-gcp allowed-ips <gcp-prefix>::/64
 ```
 
-#### r2-gcp wg1 (r3 向け) 更新
+#### r2-gcp wg2 (r3 向け) 更新
 
 ```
-set interfaces wireguard wg1 address fd00:255:2::2/126
+set interfaces wireguard wg2 address fd00:255:2::2/126
 
-set interfaces wireguard wg1 peer r3 allowed-ips fd00:255:2::1/128
-set interfaces wireguard wg1 peer r3 allowed-ips 192.168.11.0/24
-set interfaces wireguard wg1 peer r3 allowed-ips 192.168.30.0/24
-set interfaces wireguard wg1 peer r3 allowed-ips 192.168.40.0/22
-set interfaces wireguard wg1 peer r3 allowed-ips <gcp-prefix>::/64
+set interfaces wireguard wg2 peer r3 allowed-ips fd00:255:2::1/128
+set interfaces wireguard wg2 peer r3 allowed-ips 192.168.11.0/24
+set interfaces wireguard wg2 peer r3 allowed-ips 192.168.30.0/24
+set interfaces wireguard wg2 peer r3 allowed-ips 192.168.40.0/22
+set interfaces wireguard wg2 peer r3 allowed-ips <gcp-prefix>::/64
 ```
 
 #### r1 wg0 更新
@@ -378,53 +380,96 @@ set nat66 source rule 10 description 'NAT66 venue GCP prefix to r2-gcp /96'
 
 戻りパケットは r2-gcp の /96 アドレス宛で到着し、conntrack により自動的に un-NAT される。
 
-#### v4 SNAT (Google Cloud IP レンジ向け)
+#### v4 SNAT (Google IP レンジ向け)
 
-v4 の GCP 向けトラフィックは r2-gcp で SNAT する (会場 src → GCE 内部 IP)。
+v4 の Google 向けトラフィックは r2-gcp で SNAT する (会場 src → GCE 内部 IP)。
 
 ```
 # v4: 会場サブネット → GCE 内部 IP に SNAT
 set nat source rule 10 outbound-interface name eth0
 set nat source rule 10 source address 192.168.0.0/16
 set nat source rule 10 translation address masquerade
-set nat source rule 10 description 'SNAT venue to GCE for Google Cloud'
+set nat source rule 10 description 'SNAT venue to GCE for Google'
 ```
 
-#### v4 BGP: Google Cloud IP レンジ広告
+#### v4 BGP: Google IP レンジ広告 (goog.json)
 
-Google Cloud IP レンジ (`cloud.json`) を prefix-list に登録し、BGP で r3/r1 に広告する。
+Google 公式が公開している IP レンジリストのうち **`goog.json`** を採用する。
+
+| リスト | 件数 (v4/v6) | 内容 |
+|--------|------------|------|
+| `cloud.json` | 1,074 / 66 | GCP のリージョン別細粒度 prefix (Google Cloud のみ) |
+| **`goog.json`** | **94 / 15** | **Google 全体の集約済み prefix (cloud.json のスーパーセット)** |
+
+`goog.json` は `cloud.json` を内包し、かつ Gmail / YouTube / Search / Workspace 等の Google API 全般を含む。BwAI は単一リージョン (asia-northeast2) 前提でリージョン粒度の制御は不要であり、Google backbone の恩恵を Google サービス全般に広げられるため `goog.json` を選択する。両方広告は longest-match で意味が出ず BGP テーブルを冗長に肥大化させるだけなので行わない。
+
+##### BGP 広告の仕組み (重要)
+
+r2-gcp には既に default route (`0.0.0.0/0 via 10.174.0.1, eth0` = VPC GW) があり、traceroute レベルでは Google backbone に到達できている。しかし **BGP は RIB に存在する prefix しか広告しない** ため、`goog.json` の個別 prefix を RIB に載せる必要がある。
+
+そこで goog.json の各 prefix を **static route として next-hop = VPC GW (`10.174.0.1`)** で作成する。これは転送経路を変えるためではなく、**BGP 広告の材料として RIB に具体 prefix を載せる**ためだけの static である。実際のパケットは default と同じ経路で Google backbone に流れる。
+
+- next-hop に `Null0` (blackhole) を使ってはならない。RIB には載るが FIB で drop され、実トラフィックが全損する。
+- next-hop は必ず VPC GW = `10.174.0.1` を指定する。
+
+##### 設定
 
 ```
-# Google Cloud IP レンジ (prefix-list)
-# ※ cloud.json から生成、cron で定期更新
-set policy prefix-list GOOGLE-CLOUD rule 10 prefix 34.0.0.0/15 le 32
-set policy prefix-list GOOGLE-CLOUD rule 20 prefix 34.2.0.0/16 le 32
-# ... (cloud.json から自動生成)
+# === Static route (BGP に載せるためだけの経路、next-hop は VPC GW) ===
+# ※ goog.json から自動生成、cron で定期更新
+set protocols static route 8.8.4.0/24 next-hop 10.174.0.1
+set protocols static route 8.8.8.0/24 next-hop 10.174.0.1
+set protocols static route 34.64.0.0/10 next-hop 10.174.0.1
+set protocols static route 142.250.0.0/15 next-hop 10.174.0.1
+# ... (goog.json から自動生成、v4 94 本)
 
-# route-map で prefix-list に該当する経路のみ広告
-set policy route-map GOOGLE-OUT rule 10 action permit
-set policy route-map GOOGLE-OUT rule 10 match ip address prefix-list GOOGLE-CLOUD
+# === Prefix-list (広告対象の定義) ===
+set policy prefix-list GOOG rule 10 prefix 8.8.4.0/24
+set policy prefix-list GOOG rule 20 prefix 8.8.8.0/24
+set policy prefix-list GOOG rule 30 prefix 34.64.0.0/10
+set policy prefix-list GOOG rule 40 prefix 142.250.0.0/15
+# ... (goog.json から自動生成)
 
-# BGP で広告
-set protocols bgp neighbor 10.255.2.1 address-family ipv4-unicast route-map export GOOGLE-OUT
-set protocols bgp neighbor 10.255.1.1 address-family ipv4-unicast route-map export GOOGLE-OUT
+# === Route-map (prefix-list GOOG に一致する static のみ広告) ===
+set policy route-map GOOG-OUT rule 10 action permit
+set policy route-map GOOG-OUT rule 10 match ip address prefix-list GOOG
+
+# === BGP: static を redistribute (route-map でフィルタ必須) ===
+set protocols bgp address-family ipv4-unicast redistribute static route-map GOOG-OUT
 ```
 
-#### Google Cloud IP レンジ自動更新スクリプト
+`redistribute static` に `route-map` を必ず付ける。付け忘れると wg 管理用等の既存 static まで r3/r1 に漏れる。
+
+#### Google IP レンジ自動更新スクリプト
 
 ```bash
 #!/bin/bash
 # /config/scripts/update-google-prefixes.sh
-# Google Cloud IP レンジを取得し VyOS prefix-list を更新
+# goog.json を取得し VyOS の static route と prefix-list を更新
 
-CLOUD_JSON=$(curl -s https://www.gstatic.com/ipranges/cloud.json)
-PREFIXES=$(echo "$CLOUD_JSON" | jq -r '.prefixes[].ipv4Prefix // empty' | sort -u)
+set -euo pipefail
 
+NEXTHOP="10.174.0.1"
+URL="https://www.gstatic.com/ipranges/goog.json"
+TMP=$(mktemp)
+
+curl -sfL "$URL" -o "$TMP"
+
+# v4 prefix を抽出
+PREFIXES=$(jq -r '.prefixes[] | select(.ipv4Prefix) | .ipv4Prefix' "$TMP" | sort -u)
+
+# vtysh で prefix-list を置き換え
+vtysh -c "conf t" -c "no ip prefix-list GOOG"
 RULE_NUM=10
 for prefix in $PREFIXES; do
-    vtysh -c "conf t" -c "ip prefix-list GOOGLE-CLOUD seq $RULE_NUM permit $prefix le 32"
+    vtysh -c "conf t" -c "ip prefix-list GOOG seq $RULE_NUM permit $prefix"
     RULE_NUM=$((RULE_NUM + 10))
 done
+
+# static route の同期は configd 経由で反映 (既存 static を洗い替え)
+#   ※ 詳細実装は scripts/update-google-prefixes.sh を参照
+
+rm -f "$TMP"
 ```
 
 ```
@@ -432,6 +477,52 @@ done
 set system task-scheduler task update-google-prefixes interval 24h
 set system task-scheduler task update-google-prefixes executable path /config/scripts/update-google-prefixes.sh
 ```
+
+#### IPv6 の扱い (BGP 広告の対象外)
+
+`goog.json` には IPv6 prefix も 15 本含まれるが、**v6 は BGP 広告の対象としない**。v6 の振り分けは v4 とは異なる方式を採用しているためである。
+
+| 項目 | v4 | v6 |
+|------|----|----|
+| 振り分け方式 | **宛先ベース** (dst で経路選択) | **送信元ベース** (src prefix で経路選択) |
+| 制御点 | r3 の BGP 経路表 (goog.json を広告) | r3 の source-based PBR (セクション 4, 7 参照) |
+| 前提 | 単一 GUA | デュアルプレフィックス RA (OPTAGE /64 + GCP /64) |
+| 経路選択 | longest-match で BGP 経路が勝つ | クライアントの source address selection (RFC 6724) |
+
+v6 はセクション 4「デュアルプレフィックス RA 設計」で述べた通り、会場端末に OPTAGE /64 と GCP /64 の 2 つの GUA を配布し、端末がどちらを src に選んだかによって r3 の PBR が出口を決める設計である。したがって **goog.json v6 prefix を BGP で広告する必要はなく、広告するとむしろ経路非対称が発生するリスクがある**。
+
+##### 経路非対称の発生メカニズム
+
+デュアル RA 環境で v6 側にも BGP (dst ベース) を追加すると、**src address と出口経路の決定ロジックが独立**するため、組み合わせによっては送信と戻りが別経路を通る:
+
+```
+[問題シナリオ] 端末が OPTAGE /64 を src に選び、dst が goog.json 該当 (例: YouTube)
+
+送信 (r3): dst = goog 該当 → BGP longest-match で wg1 (r2-gcp) 経由
+  → r2-gcp → Google backbone
+    → src = OPTAGE /64 のまま Google に届く
+      ↓
+戻り: dst = OPTAGE /64 宛
+  → Google は OPTAGE prefix を r2-gcp 経由と認識していない
+    → 外部 Internet → OPTAGE → r1 → wg0 → r3 → 端末
+      ↓
+結果: 送信は wg1、戻りは wg0 を通る非対称経路
+```
+
+非対称経路が引き起こす具体的問題:
+
+| 問題 | 影響 |
+|------|------|
+| ステートフル FW / conntrack の破綻 | r2-gcp は送信のみ、r1 は戻りのみを見るため、どちらも状態を完結して持てず戻りパケットが drop されうる |
+| NAT66 state の喪失 | r2-gcp で NAT66 した場合、戻りが別経路だと un-NAT できず通信破綻 |
+| トラブルシュート困難 | 片側のログだけ見ても通信の全体像が追えない |
+| MTU/MSS の不整合 | wg0 (1380) と wg1 (1380) は同値だが、経路上の PMTUD が片側でしか通らない |
+
+##### 非対称を避けるための設計選択
+
+この問題を BGP 広告で解決するには、**r2-gcp で v6 全トラフィックに無条件 NAT66 をかけて src を r2-gcp /96 に強制変換する**か、**OPTAGE /64 の RA を停止してシングル GUA 化する**かのいずれかが必要になる。いずれも既存の「デュアル RA + src ベース PBR」の設計思想を壊し、r1 障害時の OPTAGE フォールバック経路や E2E ネイティブ v6 (OPTAGE 側) といった利点を失う。
+
+そのため v6 は **src ベース PBR のみ** とし、BGP 広告は v4 専用とする。v6 で確実に Google backbone 経由にしたいクライアントは、GCP /64 を src に選ぶ (OS 側の設定、または明示的 bind) ことで実現する。preferred-lifetime バイアス (セクション 4) により、特に指定がない一般 Internet 通信は OPTAGE が優先される。
 
 ### 9. トラフィックフロー
 
@@ -465,11 +556,11 @@ Internet / GCP → Google backbone
 #### IPv4
 
 ```
-[GCP 宛 (Google Cloud IP レンジ)]
+[Google 宛 (goog.json IP レンジ: GCP + Gmail/YouTube/Search 等)]
 会場デバイス (192.168.x.x)
-  → r3: BGP で学習した Google prefix → wg1
-    → r2-gcp: SNAT (192.168.x.x → 10.174.0.4)
-      → Google 内部 NW → GCP サービス
+  → r3: BGP で学習した GOOG prefix (longest-match) → wg1
+    → r2-gcp: SNAT (192.168.x.x → 10.174.0.x)
+      → VPC GW (10.174.0.1) → Google backbone → GCP / Google サービス
 
 [その他 (従来通り)]
 会場デバイス (192.168.x.x)
