@@ -148,39 +148,38 @@ set service router-advert interface eth2.30 prefix <gcp-prefix>::/64 valid-lifet
 
 ### 5. GCP インフラ構成
 
-#### VPC IPv6 有効化
+#### VPC dual-stack 有効化
 
-既存の bwai-vpc に外部 IPv6 を有効化。VPC に Google GUA /48 が割り当てられる。
+既存の `default` VPC (auto-mode から custom-mode に変換済み) に外部 IPv6 を有効化。VPC に Google GUA /48 が割り当てられる。
 
 ```bash
-# VPC に IPv6 ULA 内部レンジを設定 (外部 IPv6 はサブネット単位)
-gcloud compute networks update bwai-vpc \
-    --enable-ula-internal-ipv6
+# VPC を custom mode に変換（auto-mode では dual-stack 不可）
+gcloud compute networks update default --switch-to-custom-subnet-mode
 ```
 
 #### サブネット構成
 
-既存の r2-gcp-subnet を dual-stack 化する。r2-gcp は /64 から /96 を自動取得し、この /96 アドレスが NAT66 の変換先となる。
+既存の default サブネットを dual-stack 化する。r2-gcp は /64 から /96 を自動取得し、この /96 アドレスが NAT66 の変換先となる。
 
 会場向けに別サブネット (venue-v6-transit) を作成し、その /64 を RA 広告用のプレフィックスとして会場に転送する。このサブネットに VM は配置しない (RA 広告用のプレフィックス確保のみ)。
 
 | サブネット | IPv4 | IPv6 | 用途 |
 |-----------|------|------|------|
-| r2-gcp-subnet (既存) | 10.174.0.0/24 | dual-stack 化 (external /64) | r2-gcp 配置、NAT66 src |
-| venue-v6-transit (新規) | 10.174.1.0/24 | external IPv6 /64 | 会場 RA 広告用 (VM なし) |
+| default (既存) | 10.174.0.0/20 | `2600:1900:41d0:9d::/64` (external) | r2-gcp 配置、NAT66 src |
+| venue-v6-transit (新規) | 10.174.16.0/24 | `2600:1900:41d1:92::/64` (external) | 会場 RA 広告用 (VM なし) |
 
 ```bash
 # 既存サブネットを dual-stack に更新
-gcloud compute networks subnets update r2-gcp-subnet \
+gcloud compute networks subnets update default \
     --region=asia-northeast2 \
     --stack-type=IPV4_IPV6 \
     --ipv6-access-type=EXTERNAL
 
 # 会場 RA 広告用プレフィックス確保
 gcloud compute networks subnets create venue-v6-transit \
-    --network=bwai-vpc \
+    --network=default \
     --region=asia-northeast2 \
-    --range=10.174.1.0/24 \
+    --range=10.174.16.0/24 \
     --stack-type=IPV4_IPV6 \
     --ipv6-access-type=EXTERNAL
 ```
@@ -189,7 +188,7 @@ gcloud compute networks subnets create venue-v6-transit \
 
 #### r2-gcp VM 更新
 
-r2-gcp-subnet (dual-stack 化済み) に配置。r2-gcp は /64 から /96 を自動取得する。NAT66 により会場トラフィックの src をこの /96 アドレスに変換するため、GCP データプレーンは r2-gcp /96 宛として正しくルーティングする。
+default サブネット (dual-stack 化済み) に配置。r2-gcp (10.174.0.7) は /64 から /96 を自動取得する。NAT66 により会場トラフィックの src をこの /96 アドレスに変換するため、GCP データプレーンは r2-gcp /96 宛として正しくルーティングする。
 
 ```bash
 # IP forwarding 有効化 (VM 再作成が必要な場合がある)
@@ -197,7 +196,7 @@ gcloud compute instances create r2-gcp \
     --zone=asia-northeast2-a \
     --machine-type=e2-small \
     --can-ip-forward \
-    --network-interface=network=bwai-vpc,subnet=r2-gcp-subnet,stack-type=IPV4_IPV6 \
+    --network-interface=network=default,subnet=default,stack-type=IPV4_IPV6 \
     --image=<vyos-custom-image>
 ```
 
@@ -276,6 +275,8 @@ set interfaces wireguard wg1 address fd00:255:1::1/126
 set interfaces wireguard wg1 peer r2-gcp allowed-ips fd00:255:1::2/128
 set interfaces wireguard wg1 peer r2-gcp allowed-ips fd00:255:2::/126
 ```
+
+※ r1 wg1 peer r2-gcp の allowed-ips には goog.json の IPv4 プレフィックス (96 本) も追加が必要。追加しないと WG の crypto routing で Google 宛パケットがドロップされる。goog.json 自動更新スクリプトと連動して allowed-ips も更新する。
 
 ### 7. r3 設定 (会場 VyOS)
 
@@ -497,6 +498,46 @@ set protocols static route 34.97.197.104/32 interface pppoe0
 ```
 
 r2-gcp の外部 IP が変更された場合（VM 再作成等）、この escape route も更新が必要。
+
+#### GCE GW host route (重要)
+
+BGP default (AD=20, via wg1) が GCE の static default (AD=210, via eth0) に勝つと、VyOS static route の `next-hop 10.174.0.1` が wg1 経由に再帰解決され、goog.json の全 96 本の static route が wg1 にループする。
+
+GCE GW (10.174.0.1) への /32 host route を `dev eth0` で固定し、全 next-hop の再帰解決を防止する:
+
+```
+# GCE GW host route (VyOS CLI では onlink 非対応のため kernel 直叩き)
+ip route add 10.174.0.1/32 dev eth0
+```
+
+※ VyOS の `protocols static route` は `onlink` フラグ非対応。`/config/scripts/wg-r1-tracker.sh` で起動時・毎分に設定する。
+
+#### r2 escape route (r1 WAN IP 追従)
+
+r1 の WAN IP (PPPoE, 動的) への escape route も同様に必要。r1 の DDNS (`tukushityann.net`) を解決し、`/32 dev eth0` で固定する。`/config/scripts/wg-r1-tracker.sh` (task-scheduler 毎分) で自動追従。
+
+#### policy local-route (r2 自身のトラフィック分離)
+
+r2 が BGP default を受け入れると、r2 自身の通信 (SSH, API, DNS 等) も wg1 経由になる。`policy local-route` で r2 自身のトラフィック (src=10.174.0.7) を GCE GW に固定する:
+
+```
+set policy local-route rule 10 set table 200
+set policy local-route rule 10 source address 10.174.0.7
+set protocols static table 200 route 0.0.0.0/0 next-hop 10.174.0.1
+```
+
+※ table 200 の default route も `ip route replace default via 10.174.0.1 dev eth0 table 200` で kernel 直叩きが必要（再帰解決防止）。
+
+#### v4 SNAT 追加 (WG トンネルアドレス)
+
+r1/r3 の WG トンネルアドレス (10.255.x.x) から r2 経由で Google に出るトラフィック用:
+
+```
+set nat source rule 20 outbound-interface name eth0
+set nat source rule 20 source address 10.255.0.0/16
+set nat source rule 20 translation address masquerade
+set nat source rule 20 description 'SNAT WG tunnel addresses for Google transit'
+```
 
 #### Google IP レンジ自動更新スクリプト
 

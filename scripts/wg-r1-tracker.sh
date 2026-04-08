@@ -20,6 +20,12 @@ WG_PORT="51820"
 PHYS_IF="eth1"
 STATE="/var/run/wg-r1-tracker.last-ip"
 
+# r2-gcp endpoint (GCP 固定 IP)
+R2_ENDPOINT="34.97.197.104"
+R2_WG_IF="wg1"
+R2_PEER_KEY="MrqbDhJi5hremMyo7lX1ColZshPKlwgiIjNlsel/w24="
+R2_WG_PORT="51821"
+
 # --- DNS 解決 ---
 NEW_IP=$(getent ahostsv4 "$FQDN" 2>/dev/null | awk 'NR==1{print $1}')
 if [ -z "$NEW_IP" ]; then
@@ -56,5 +62,13 @@ if [ "$LAST_IP" != "$NEW_IP" ]; then
     echo "$NEW_IP" > "$STATE"
     logger -t wg-r1-tracker "r1 endpoint updated: ${LAST_IP:-<none>} -> $NEW_IP (via $GW dev $PHYS_IF)"
 fi
+
+# --- r2-gcp endpoint: wg0 経由の double encapsulation パス ---
+# VyOS の WG peer address 設定は eth1 経由の auto-route を作成するが、
+# 会場上流 (blackbox) が UDP をブロックする場合がある。
+# wg0 (r1) 経由にルーティングし、r1 の escape route 経由で r2 に到達させる。
+# VyOS config から address/port を削除し、wg set で endpoint を直接設定する。
+ip route replace "$R2_ENDPOINT" via 10.255.0.1 dev wg0 proto static 2>/dev/null || true
+wg set "$R2_WG_IF" peer "$R2_PEER_KEY" endpoint "$R2_ENDPOINT:$R2_WG_PORT" 2>/dev/null || true
 
 exit 0

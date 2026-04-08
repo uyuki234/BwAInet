@@ -399,12 +399,18 @@ set interfaces wireguard wg1 peer r2-gcp allowed-ips 10.255.2.0/30
 set interfaces wireguard wg1 peer r2-gcp allowed-ips 192.168.11.0/24
 set interfaces wireguard wg1 peer r2-gcp allowed-ips 192.168.30.0/24
 set interfaces wireguard wg1 peer r2-gcp allowed-ips 192.168.40.0/22
+# goog.json IPv4 プレフィックス (96 本) を allowed-ips に追加
+# → WG の crypto routing で Google 宛パケットを r2-gcp に送信可能にする
+# ※ goog.json 更新時に allowed-ips も連動更新が必要
+set interfaces wireguard wg1 peer r2-gcp allowed-ips 8.8.8.0/24
+set interfaces wireguard wg1 peer r2-gcp allowed-ips 34.64.0.0/10
+# ... (goog.json v4 全 96 本)
 set interfaces wireguard wg1 peer r2-gcp persistent-keepalive 25
 
 set firewall options interface wg1 adjust-mss clamp-mss-to-pmtu
 ```
 
-> **注**: r2-gcp peer に会場プレフィックスを許可しているのは、r1↔r3 直結断時に r2-gcp 経由で会場トラフィックを迂回受信するため。
+> **注**: r2-gcp peer に会場プレフィックスを許可しているのは、r1↔r3 直結断時に r2-gcp 経由で会場トラフィックを迂回受信するため。goog.json プレフィックスを追加することで、Google 宛トラフィックを GCP (r2-gcp) 経由で直接送信できる。goog.json の更新時には allowed-ips も連動して更新する必要がある。
 
 ## BGP (AS65002)
 
@@ -435,6 +441,10 @@ set protocols bgp neighbor 10.255.1.2 remote-as 64512
 set protocols bgp neighbor 10.255.1.2 description 'r2-gcp'
 set protocols bgp neighbor 10.255.1.2 address-family ipv4-unicast
 set protocols bgp neighbor 10.255.1.2 address-family ipv4-unicast route-map import GCP-IN
+# r2 へ default-originate (r2 をトランジットルーターにする)
+set protocols bgp neighbor 10.255.1.2 address-family ipv4-unicast default-originate
+set protocols bgp neighbor 10.255.1.2 address-family ipv6-unicast default-originate
+set protocols bgp neighbor 10.255.1.2 address-family ipv6-unicast route-map import GCP-IN
 
 # --- ネットワーク広告 ---
 set protocols bgp address-family ipv4-unicast network 192.168.10.0/24
@@ -465,6 +475,17 @@ WireGuard (wg0) ダウン時は r3 との BGP セッションも落ち、local-p
 # set protocols static route 192.168.11.0/24
 # set protocols static route 192.168.30.0/24 next-hop 10.255.1.2
 # set protocols static route 192.168.40.0/22 next-hop 10.255.1.2
+```
+
+### r2-gcp endpoint の escape route
+
+goog.json BGP 広告により `34.64.0.0/10` 等が wg1 経由になるが、WG 外側パケット (`dst=34.97.197.104`) は pppoe0 から出す必要がある。goog.json プレフィックスの中に r2-gcp の公開 IP が含まれるため、`/32` の static route で pppoe0 に escape させる。
+
+```
+# r2-gcp endpoint の escape route
+# goog.json BGP 広告により 34.64.0.0/10 等が wg1 経由になるが、
+# WG 外側パケット (dst=34.97.197.104) は pppoe0 から出す必要がある
+set protocols static route 34.97.197.104/32 interface pppoe0
 ```
 
 ## IPv6 プレフィックス委任 (会場向け)
@@ -652,6 +673,10 @@ set interfaces wireguard wg1 peer r2-gcp allowed-ips 10.255.2.0/30
 set interfaces wireguard wg1 peer r2-gcp allowed-ips 192.168.11.0/24
 set interfaces wireguard wg1 peer r2-gcp allowed-ips 192.168.30.0/24
 set interfaces wireguard wg1 peer r2-gcp allowed-ips 192.168.40.0/22
+# goog.json IPv4 プレフィックス (96 本)
+set interfaces wireguard wg1 peer r2-gcp allowed-ips 8.8.8.0/24
+set interfaces wireguard wg1 peer r2-gcp allowed-ips 34.64.0.0/10
+# ... (goog.json v4 全 96 本)
 set interfaces wireguard wg1 peer r2-gcp persistent-keepalive 25
 
 # MSS Clamping (wg0, wg1)
@@ -813,6 +838,9 @@ set service ntp server ntp.jst.mfeed.ad.jp
 #   set protocols static route 192.168.30.0/24 next-hop 10.255.1.2
 #   set protocols static route 192.168.40.0/22 next-hop 10.255.1.2
 
+# r2-gcp endpoint の escape route (goog.json プレフィックスが wg1 経由になるため /32 で pppoe0 へ)
+set protocols static route 34.97.197.104/32 interface pppoe0
+
 # BGP (AS65002)
 set protocols bgp system-as 65002
 
@@ -823,11 +851,14 @@ set protocols bgp neighbor 10.255.0.2 address-family ipv4-unicast
 set protocols bgp neighbor 10.255.0.2 address-family ipv4-unicast route-map import WG-IN
 set protocols bgp neighbor 10.255.0.2 address-family ipv4-unicast default-originate
 
-# r2-gcp (GCP トランジット)
+# r2-gcp (GCP トランジット) — r2 へ default-originate (トランジットルーター化)
 set protocols bgp neighbor 10.255.1.2 remote-as 64512
 set protocols bgp neighbor 10.255.1.2 description 'r2-gcp'
 set protocols bgp neighbor 10.255.1.2 address-family ipv4-unicast
 set protocols bgp neighbor 10.255.1.2 address-family ipv4-unicast route-map import GCP-IN
+set protocols bgp neighbor 10.255.1.2 address-family ipv4-unicast default-originate
+set protocols bgp neighbor 10.255.1.2 address-family ipv6-unicast default-originate
+set protocols bgp neighbor 10.255.1.2 address-family ipv6-unicast route-map import GCP-IN
 
 # ネットワーク広告
 set protocols bgp address-family ipv4-unicast network 192.168.10.0/24
